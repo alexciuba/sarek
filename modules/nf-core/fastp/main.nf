@@ -32,15 +32,16 @@ process FASTP {
     def fail_fastq = save_trimmed_fail && meta.single_end ? "--failed_out ${prefix}.fail.fastq.gz" : save_trimmed_fail && !meta.single_end ? "--failed_out ${prefix}.paired.fail.fastq.gz --unpaired1 ${prefix}_R1.fail.fastq.gz --unpaired2 ${prefix}_R2.fail.fastq.gz" : ''
     def out_fq1 = discard_trimmed_pass ?: ( meta.single_end ? "--out1 ${prefix}.fastp.fastq.gz" : "--out1 ${prefix}_R1.fastp.fastq.gz" )
     def out_fq2 = discard_trimmed_pass ?: "--out2 ${prefix}_R2.fastp.fastq.gz"
+    def input_extensions = (reads instanceof List ? reads : [reads]).collect { read -> read.name.endsWith('.gz') ? 'fastq.gz' : 'fastq' }
     // Added soft-links to original fastqs for consistent naming in MultiQC
     // Use single ended for interleaved. Add --interleaved_in in config.
     if ( task.ext.args?.contains('--interleaved_in') ) {
         """
-        [ ! -f  ${prefix}.fastq.gz ] && ln -sf $reads ${prefix}.fastq.gz
+        [ ! -f  ${prefix}.${input_extensions[0]} ] && ln -sf $reads ${prefix}.${input_extensions[0]}
 
         fastp \\
             --stdout \\
-            --in1 ${prefix}.fastq.gz \\
+            --in1 ${prefix}.${input_extensions[0]} \\
             --thread $task.cpus \\
             --json ${prefix}.fastp.json \\
             --html ${prefix}.fastp.html \\
@@ -52,10 +53,10 @@ process FASTP {
         """
     } else if (meta.single_end) {
         """
-        [ ! -f  ${prefix}.fastq.gz ] && ln -sf $reads ${prefix}.fastq.gz
+        [ ! -f  ${prefix}.${input_extensions[0]} ] && ln -sf $reads ${prefix}.${input_extensions[0]}
 
         fastp \\
-            --in1 ${prefix}.fastq.gz \\
+            --in1 ${prefix}.${input_extensions[0]} \\
             $out_fq1 \\
             --thread $task.cpus \\
             --json ${prefix}.fastp.json \\
@@ -68,11 +69,11 @@ process FASTP {
     } else {
         def merge_fastq = save_merged ? "-m --merged_out ${prefix}.merged.fastq.gz" : ''
         """
-        [ ! -f  ${prefix}_R1.fastq.gz ] && ln -sf ${reads[0]} ${prefix}_R1.fastq.gz
-        [ ! -f  ${prefix}_R2.fastq.gz ] && ln -sf ${reads[1]} ${prefix}_R2.fastq.gz
+        [ ! -f  ${prefix}_R1.${input_extensions[0]} ] && ln -sf ${reads[0]} ${prefix}_R1.${input_extensions[0]}
+        [ ! -f  ${prefix}_R2.${input_extensions[1]} ] && ln -sf ${reads[1]} ${prefix}_R2.${input_extensions[1]}
         fastp \\
-            --in1 ${prefix}_R1.fastq.gz \\
-            --in2 ${prefix}_R2.fastq.gz \\
+            --in1 ${prefix}_R1.${input_extensions[0]} \\
+            --in2 ${prefix}_R2.${input_extensions[1]} \\
             $out_fq1 \\
             $out_fq2 \\
             --json ${prefix}.fastp.json \\

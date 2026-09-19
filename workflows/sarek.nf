@@ -686,8 +686,8 @@ def readFirstLineOfFastq(path) {
     def line = null
     try {
         path.withInputStream { stream ->
-            def InputStream gzipStream = new java.util.zip.GZIPInputStream(stream)
-            def Reader decoder = new InputStreamReader(gzipStream, 'ASCII')
+            InputStream fastqStream = path.name.endsWith('.gz') ? new java.util.zip.GZIPInputStream(stream) : stream
+            def Reader decoder = new InputStreamReader(fastqStream, 'ASCII')
             def BufferedReader buffered = new BufferedReader(decoder)
             line = buffered.readLine()
             assert line.startsWith('@')

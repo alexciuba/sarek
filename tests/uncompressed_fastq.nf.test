@@ -1,0 +1,77 @@
+nextflow_pipeline {
+
+    name "FASTQ input compression"
+    script "../main.nf"
+    tag "pipeline"
+    tag "pipeline_sarek"
+    tag "cpu_conda"
+
+    [0, 50000000].each { split_reads ->
+        test("Plain, gzipped and mixed FASTQs with split_fastq=${split_reads}") {
+
+            when {
+                params {
+                    def input_dir = new File("${outputDir}/inputs")
+                    input_dir.mkdirs()
+                    def fastqs = (1..2).collect { mate ->
+                        def url = new URL("https://raw.githubusercontent.com/nf-core/test-datasets/modules/data/genomics/homo_sapiens/illumina/fastq/test_${mate}.fastq.gz")
+                        url.withInputStream { stream ->
+                            new java.util.zip.GZIPInputStream(stream).withReader { reader ->
+                                reader.readLines().take(400).collate(4).withIndex().collect { record, index ->
+                                    record[0] = "@instrument:1:FLOWCELL:1:1:1:${index} ${mate}:N:0:1"
+                                    record.join('\n')
+                                }.join('\n') + '\n'
+                            }
+                        }
+                    }
+                    def rows = ['patient,sample,lane,fastq_1,fastq_2']
+                    [[false, false], [true, true], [false, true], [true, false]].eachWithIndex { compressed, index ->
+                        def reads = (0..1).collect { mate ->
+                            def extension = mate == 0 ? 'fastq' : 'fq'
+                            def read = new File(input_dir, "sample${index}_R${mate + 1}.${extension}${compressed[mate] ? '.gz' : ''}")
+                            if (compressed[mate]) {
+                                read.withOutputStream { stream ->
+                                    new java.util.zip.GZIPOutputStream(stream).withWriter { writer -> writer.write(fastqs[mate]) }
+                                }
+                            } else {
+                                read.text = fastqs[mate]
+                            }
+                            read.absolutePath
+                        }
+                        rows.add("patient,sample${index},L1,${reads.join(',')}")
+                    }
+                    def samplesheet = new File(input_dir, 'samplesheet.csv')
+                    samplesheet.text = rows.join('\n') + '\n'
+
+                    input = samplesheet.absolutePath
+                    outdir = "${outputDir}/results"
+                    split_fastq = split_reads
+                    no_intervals = true
+                    save_mapped = true
+                    save_output_as_bam = true
+                    skip_tools = 'baserecalibrator,markduplicates,mosdepth,multiqc,samtools'
+                    tools = ''
+                }
+            }
+
+            then {
+                assert workflow.success
+                assert !(workflow.stdout + workflow.stderr).join('\n').contains('Error streaming')
+                assert workflow.trace.succeeded().any { task -> task.name.contains(':FASTP') } == (split_reads > 0)
+                def bams = []
+                new File("${outputDir}/results/preprocessing/mapped").eachFileRecurse { file ->
+                    if (file.name == "${file.parentFile.name}.sorted.bam") bams.add(file)
+                }
+                assert bams.size() == 4
+                bams.each { file ->
+                    htsjdk.samtools.SamReaderFactory.makeDefault().open(file).withCloseable { reader ->
+                        def expected_id = "FLOWCELL.${file.parentFile.name}.L1".toString()
+                        assert reader.fileHeader.readGroups*.id.contains(expected_id)
+                        assert reader.fileHeader.readGroups.every { group -> group.id == expected_id || group.id.startsWith("${expected_id}-") }
+                        assert reader.iterator().hasNext()
+                    }
+                }
+            }
+        }
+    }
+}
